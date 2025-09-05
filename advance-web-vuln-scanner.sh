@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# Advance Web Vuln Scanner (Pro Edition v11.2)
+# Advance Web Vuln Scanner (Pro Edition v11.4)
 # Author: Veer Kumar
 #
 
-set -u  # safer, but removed -e so script won't stop on errors
+set -u
 IFS=$'\n\t'
 
 # ---------------- Colors ----------------
@@ -21,9 +21,33 @@ cat <<'EOF'
 #                                                          #
 ############################################################
 EOF
-echo "Version: 11.2"
+echo "Version: 11.4"
 echo "Date: $(date '+%Y-%m-%d %H:%M:%S')"
 echo
+}
+
+# ---------------- Dependency Checker + Auto Installer ----------------
+check_dependencies() {
+    echo -e "${CYAN}[>] Checking dependencies...${RESET}"
+    local deps=("wapiti" "wpscan" "nmap" "wafw00f" "whatweb" "sslscan" "dnsrecon")
+
+    for dep in "${deps[@]}"; do
+        if ! command -v "$dep" >/dev/null 2>&1; then
+            echo -e "${RED}[-] Missing: $dep${RESET}"
+            read -rp "   Do you want to install $dep now? (y/n): " ans
+            if [[ "$ans" =~ ^[Yy]$ ]]; then
+                echo -e "${YELLOW}[>] Installing $dep...${RESET}"
+                sudo apt update -y && sudo apt install -y "$dep" || {
+                    echo -e "${RED}[!] Failed to install $dep. Please install manually.${RESET}"
+                }
+            else
+                echo -e "${YELLOW}[!] Skipping installation of $dep. Some scans may not work.${RESET}"
+            fi
+        else
+            echo -e "${GREEN}[+] Found: $dep${RESET}"
+        fi
+    done
+    echo
 }
 
 # ---------------- Target Parsing ----------------
@@ -95,7 +119,6 @@ run_tool() {
     local out="$REPORT_DIR/${tool}.txt"
     echo -e "${CYAN}[>] Running $title ($tool)...${RESET}"
 
-    # Run tool, capture output, ignore exit code errors
     { "$@" 2>&1 || true; } | tee "$out"
 
     if [ -s "$out" ]; then
@@ -150,6 +173,7 @@ menu() {
 # ---------------- Main ----------------
 main() {
     banner
+    check_dependencies
     read -rp "Enter target (domain/IP/URL): " target
     parse_target "$target"
     start_report

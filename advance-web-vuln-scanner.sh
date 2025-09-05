@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# Advance Web Vuln Scanner (Pro Edition)
+# Advance Web Vuln Scanner (Pro Edition v11.2)
 # Author: Veer Kumar
 #
 
-set -euo pipefail
+set -u  # safer, but removed -e so script won't stop on errors
 IFS=$'\n\t'
 
 # ---------------- Colors ----------------
@@ -21,7 +21,7 @@ cat <<'EOF'
 #                                                          #
 ############################################################
 EOF
-echo "Version: 3.0"
+echo "Version: 11.2"
 echo "Date: $(date '+%Y-%m-%d %H:%M:%S')"
 echo
 }
@@ -89,70 +89,48 @@ parse_risks() {
     done <"$file"
 }
 
-# ---------------- Spinner ----------------
-spinner() {
-    local pid=$1 label=$2
-    local spin='-\|/'; local i=0
-    while kill -0 "$pid" 2>/dev/null; do
-        i=$(((i + 1) % 4))
-        printf "\r${CYAN}[>]${RESET} %-25s %s" "$label" "${spin:$i:1}"
-        sleep 0.2
-    done
-    wait "$pid"
-    local exit_code=$?
-    if [ $exit_code -eq 0 ]; then
-        printf "\r${GREEN}[+] %-25s finished        \n" "$label"
-    else
-        printf "\r${RED}[-] %-25s failed (exit $exit_code)\n" "$label"
-    fi
-}
-
 # ---------------- Tool Runner ----------------
 run_tool() {
     local title="$1" tool="$2"; shift 2
     local out="$REPORT_DIR/${tool}.txt"
-    if [ "$LIVE_OUTPUT" -eq 1 ]; then
-        ( "$@" >"$out" 2>&1 & )
-        spinner $! "$tool"
-    else
-        ( "$@" >"$out" 2>&1 ) &
-        spinner $! "$tool"
-    fi
-    if [ -f "$out" ]; then
+    echo -e "${CYAN}[>] Running $title ($tool)...${RESET}"
+
+    # Run tool, capture output, ignore exit code errors
+    { "$@" 2>&1 || true; } | tee "$out"
+
+    if [ -s "$out" ]; then
         parse_risks "$out"
         append_section "$title" "$tool" "$out"
+    else
+        echo "[!] No output captured for $tool" | tee -a "$out"
+        append_section "$title" "$tool" "$out"
     fi
+
+    echo -e "${GREEN}[+] Finished $title${RESET}\n"
 }
 
 # ---------------- Individual Scans ----------------
-scan_wapiti()      { run_tool "Web Vulnerability Scan" "wapiti"      wapiti -u "$TARGET_URL" -m all; }
-scan_wpscan()      { run_tool "WordPress Assessment" "wpscan"       wpscan --url "$TARGET_URL" --no-banner --random-user-agent --force --disable-tls-checks; }
-scan_nmap()        { run_tool "Port & Service Enumeration" "nmap"   nmap -Pn -sV --top-ports 1000 -T4 "$HOST"; }
-scan_wafw00f()     { run_tool "WAF Detection" "wafw00f"             wafw00f -a "$TARGET_URL"; }
-scan_whatweb()     { run_tool "Technology Fingerprinting" "whatweb" whatweb -a 3 "$TARGET_URL"; }
-scan_sslscan()     { run_tool "SSL/TLS Review" "sslscan"            sslscan --no-failed "$HOST:443"; }
-scan_dnsrecon()    { run_tool "DNS Reconnaissance" "dnsrecon"       dnsrecon -d "$HOST"; }
+scan_wapiti()   { run_tool "Web Vulnerability Scan" "wapiti"      wapiti -u "$TARGET_URL" -m all; }
+scan_wpscan()   { run_tool "WordPress Assessment" "wpscan"       wpscan --url "$TARGET_URL" --no-banner --random-user-agent --force --disable-tls-checks; }
+scan_nmap()     { run_tool "Port & Service Enumeration" "nmap"   nmap -Pn -sV --top-ports 1000 -T4 "$HOST"; }
+scan_wafw00f()  { run_tool "WAF Detection" "wafw00f"             wafw00f -a "$TARGET_URL"; }
+scan_whatweb()  { run_tool "Technology Fingerprinting" "whatweb" whatweb -a 3 "$TARGET_URL"; }
+scan_sslscan()  { run_tool "SSL/TLS Review" "sslscan"            sslscan --no-failed "$HOST:443"; }
+scan_dnsrecon() { run_tool "DNS Reconnaissance" "dnsrecon"       dnsrecon -d "$HOST"; }
 
+# ---------------- Scan All ----------------
 scan_all() {
-    declare -a jobs=()
-    if [ $PARALLEL -eq 1 ]; then
-        scan_wapiti & jobs+=($!)
-        scan_wpscan & jobs+=($!)
-        scan_nmap & jobs+=($!)
-        scan_wafw00f & jobs+=($!)
-        scan_whatweb & jobs+=($!)
-        scan_sslscan & jobs+=($!)
-        scan_dnsrecon & jobs+=($!)
-        wait "${jobs[@]}"
-    else
-        scan_wapiti
-        scan_wpscan
-        scan_nmap
-        scan_wafw00f
-        scan_whatweb
-        scan_sslscan
-        scan_dnsrecon
-    fi
+    echo -e "${YELLOW}[>] Running full scan on $TARGET_URL${RESET}\n"
+
+    scan_wapiti   || true
+    scan_wpscan   || true
+    scan_nmap     || true
+    scan_wafw00f  || true
+    scan_whatweb  || true
+    scan_sslscan  || true
+    scan_dnsrecon || true
+
+    echo -e "${GREEN}[+] Full scan finished!${RESET}\n"
 }
 
 # ---------------- Menu ----------------
@@ -172,27 +150,6 @@ menu() {
 # ---------------- Main ----------------
 main() {
     banner
-    # Execution Mode
-    echo "Execution Mode:"
-    echo "1) Parallel (faster)"
-    echo "2) Sequential (safer)"
-    read -rp "Choose [1-2]: " m
-    case $m in
-        1) PARALLEL=1 ;;
-        2) PARALLEL=0 ;;
-        *) PARALLEL=0 ;;
-    esac
-    # Output Mode
-    echo "Output Mode:"
-    echo "1) Spinner-only (clean)"
-    echo "2) Live Output (verbose)"
-    read -rp "Choose [1-2]: " o
-    case $o in
-        1) LIVE_OUTPUT=0 ;;
-        2) LIVE_OUTPUT=1 ;;
-        *) LIVE_OUTPUT=0 ;;
-    esac
-
     read -rp "Enter target (domain/IP/URL): " target
     parse_target "$target"
     start_report
